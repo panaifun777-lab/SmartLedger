@@ -1,0 +1,194 @@
+// AVATAR Agent - Personal AI Assistant Database Schema
+// Adapted from PostgreSQL design to SQLite for personal use
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x", "debian-openssl-1.1.x"]
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// Core Models
+// ============================================================
+
+/// Long-term memory storage for AI agent
+/// Supports types: fact, preference, skill, context, rule, event
+model MemoryItem {
+  id          String   @id @default(cuid())
+  agentId     String   @default("avatar-agent")
+  userId      String   @default("default-user")
+  memoryType  String   // fact, preference, skill, context, rule, event
+  scope       String   @default("private") // private, team, org
+  content     String
+  importance  Float    @default(0.5)
+  confidence  Float    @default(0.5)
+  sourceType  String   @default("chat") // chat, api, file, tool, manual
+  sourceId    String?
+  status      String   @default("active") // active, deprecated, archived
+  metadata    String   @default("{}") // JSON string for flexible data
+  expiresAt   DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  versions    MemoryVersion[]
+  relationsFrom MemoryRelation[] @relation("FromMemory")
+  relationsTo   MemoryRelation[] @relation("ToMemory")
+
+  @@index([memoryType, status])
+  @@index([status, updatedAt])
+  @@index([importance])
+  @@index([sourceType])
+}
+
+/// Version history for memory changes (append-only audit trail)
+model MemoryVersion {
+  id           String     @id @default(cuid())
+  memoryItemId String
+  versionNo    Int
+  content      String
+  metadata     String     @default("{}") // JSON string
+  changeReason String?
+  createdAt    DateTime   @default(now())
+
+  // Relations
+  memoryItem   MemoryItem @relation(fields: [memoryItemId], references: [id], onDelete: Cascade)
+
+  @@unique([memoryItemId, versionNo])
+  @@index([memoryItemId])
+}
+
+/// Relationships between memories (knowledge graph)
+model MemoryRelation {
+  id            String     @id @default(cuid())
+  fromMemoryId  String
+  toMemoryId    String
+  relationType  String   // related_to, supports, contradicts, derived_from
+  weight        Float    @default(0.5)
+  metadata      String   @default("{}") // JSON string
+  createdAt     DateTime @default(now())
+
+  // Relations
+  fromMemory    MemoryItem @relation("FromMemory", fields: [fromMemoryId], references: [id], onDelete: Cascade)
+  toMemory      MemoryItem @relation("ToMemory", fields: [toMemoryId], references: [id], onDelete: Cascade)
+
+  @@index([fromMemoryId])
+  @@index([toMemoryId])
+  @@index([relationType])
+}
+
+/// Agent execution logs for audit, debugging and replay
+model AgentRun {
+  id           String   @id @default(cuid())
+  agentId      String   @default("avatar-agent")
+  userId       String   @default("default-user")
+  taskId       String?
+  taskName     String?
+  status       String   // running, success, failed, cancelled
+  inputText    String?
+  outputText   String?
+  errorMessage String?
+  toolsUsed    String   @default("[]") // JSON array of tool names
+  duration     Int?     // milliseconds
+  metadata     String   @default("{}") // JSON string
+  startedAt    DateTime @default(now())
+  endedAt      DateTime?
+
+  @@index([status, startedAt])
+  @@index([agentId, startedAt])
+  @@index([taskId])
+}
+
+/// Chat conversations
+model Conversation {
+  id          String    @id @default(cuid())
+  title       String    @default("New Conversation")
+  summary     String?
+  tags        String    @default("[]") // JSON array
+  isPinned    Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  // Relations
+  messages    Message[]
+
+  @@index([updatedAt])
+  @@index([isPinned])
+}
+
+/// Knowledge base documents
+model KnowledgeDoc {
+  id          String   @id @default(cuid())
+  title       String
+  sourceType  String   // text, file, url
+  sourceUrl   String?
+  content     String   // full original content
+  chunkCount  Int      @default(0)
+  status      String   @default("processing") // processing, ready, error
+  errorMessage String?
+  metadata    String   @default("{}")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  chunks      KnowledgeChunk[]
+
+  @@index([status, updatedAt])
+}
+
+/// Document chunks for RAG retrieval
+model KnowledgeChunk {
+  id           String       @id @default(cuid())
+  docId        String
+  chunkIndex   Int
+  content      String
+  tokenCount   Int?
+  metadata     String       @default("{}")
+  createdAt    DateTime     @default(now())
+
+  doc          KnowledgeDoc @relation(fields: [docId], references: [id], onDelete: Cascade)
+
+  @@index([docId, chunkIndex])
+}
+
+/// Individual messages in conversations
+model Message {
+  id             String       @id @default(cuid())
+  conversationId String
+  role           String       // user, assistant, system
+  content        String
+  model          String?
+  tokensUsed     Int?
+  toolsCalled    String       @default("[]") // JSON array of tool calls
+  memoryRefs     String       @default("[]") // JSON array of memory IDs referenced
+  metadata       String       @default("{}") // JSON string
+  createdAt      DateTime     @default(now())
+
+  // Relations
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+  @@index([role])
+}
+
+/// Bot connections for external messaging platforms (Feishu, WeChat, Telegram)
+model BotConnection {
+  id          String    @id @default(cuid())
+  platform    String    // "feishu" | "wechat" | "telegram"
+  name        String    // Display name
+  webhookUrl  String?   // Webhook URL for the bot
+  botToken    String?   // Bot token (encrypted in future, plain for now)
+  chatId      String?   // Default chat/channel ID
+  enabled     Boolean   @default(false)
+  status      String    @default("disconnected") // "connected" | "disconnected" | "error"
+  lastSyncAt  DateTime?
+  metadata    String?   // JSON string for extra config
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([platform])
+  @@index([enabled])
+}

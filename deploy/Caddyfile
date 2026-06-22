@@ -1,0 +1,31 @@
+{$DOMAIN:localhost} {
+    reverse_proxy avatar-agent:3000 {
+        header_up Host {host}
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+    }
+
+    # Security headers
+    header {
+        X-Content-Type-Options nosniff
+        X-Frame-Options DENY
+        Referrer-Policy strict-origin-when-cross-origin
+        Permissions-Policy "camera=(), microphone=(self), geolocation=()"
+    }
+
+    # Cache static assets (immutable)
+    @static path *.js *.css *.png *.jpg *.svg *.ico *.woff2 *.woff *.ttf
+    header @static Cache-Control "public, max-age=31536000, immutable"
+
+    # Cache manifest (short time for PWA updates)
+    @manifest path /manifest.json
+    header @manifest Cache-Control "public, max-age=300"
+
+    # Service worker must never be cached
+    @sw path /sw.js /sw-register.js
+    header @sw Cache-Control "no-cache, no-store, must-revalidate"
+
+    # Compress responses
+    encode gzip zstd
+}

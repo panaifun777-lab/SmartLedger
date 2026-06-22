@@ -1,0 +1,80 @@
+version: "3.9"
+
+services:
+  avatar-agent:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: avatar-agent
+    restart: always
+    ports:
+      - "3000:3000"
+    volumes:
+      - avatar-db:/app/db
+      - /opt/avatar-agent/.z-ai-config:/etc/.z-ai-config:ro
+      - avatar-uploads:/app/upload
+    environment:
+      - DATABASE_URL=file:/app/db/custom.db
+      - NODE_ENV=production
+    env_file:
+      - .env
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    networks:
+      - avatar-net
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: avatar-caddy
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    environment:
+      - DOMAIN=${DOMAIN:-localhost}
+    depends_on:
+      avatar-agent:
+        condition: service_healthy
+    networks:
+      - avatar-net
+
+  backup:
+    image: alpine:3.19
+    container_name: avatar-backup
+    restart: always
+    volumes:
+      - avatar-db:/db-source:ro
+      - ./backups:/backups
+    entrypoint: >
+      sh -c '
+        echo "Backup service started. Running daily at 03:00..."
+        while true; do
+          DATE=$$(date +%Y%m%d_%H%M)
+          cp /db-source/custom.db /backups/avatar_$$DATE.db 2>/dev/null || true
+          find /backups -name "*.db" -mtime +30 -delete 2>/dev/null || true
+          echo "[$$DATE] Backup completed"
+          sleep 86400
+        done
+      '
+
+volumes:
+  avatar-db:
+    driver: local
+  avatar-uploads:
+    driver: local
+  caddy-data:
+    driver: local
+  caddy-config:
+    driver: local
+
+networks:
+  avatar-net:
+    driver: bridge

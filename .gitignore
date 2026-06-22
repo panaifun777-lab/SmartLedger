@@ -1,0 +1,49 @@
+# Dependencies
+node_modules
+.pnp
+.pnp.js
+
+# Next.js build
+.next/
+out/
+build/
+dist/
+
+# Production
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment files (contain secrets!)
+.env
+.env.local
+.env.*.local
+
+# Database (local dev only, container uses Docker volume)
+db/*.db
+db/*.db-journal
+db/*.db-wal
+db/*.db-shm
+
+# Backups
+deploy/backups/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Uploaded user files
+upload/
+public/upload/
+public/generated/
+
+# Tool results (agent dev artifacts)
+tool-results/
+agent-ctx/

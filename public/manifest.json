@@ -1,0 +1,75 @@
+{
+  "name": "SmartLedger Agent - 个人AI智能体助手",
+  "short_name": "SmartLedger",
+  "description": "SmartLedger Agent 是一款功能强大的个人 AI 智能体助手，集成了对话管理、记忆系统、任务执行和数据分析功能。",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#030a14",
+  "theme_color": "#059669",
+  "orientation": "any",
+  "scope": "/",
+  "lang": "zh-CN",
+  "dir": "ltr",
+  "categories": ["productivity", "utilities"],
+  "icons": [
+    {
+      "src": "/icons/icon-72.png",
+      "sizes": "72x72",
+      "type": "image/png"
+    },
+    {
+      "src": "/icons/icon-96.png",
+      "sizes": "96x96",
+      "type": "image/png"
+    },
+    {
+      "src": "/icons/icon-128.png",
+      "sizes": "128x128",
+      "type": "image/png"
+    },
+    {
+      "src": "/icons/icon-144.png",
+      "sizes": "144x144",
+      "type": "image/png"
+    },
+    {
+      "src": "/icons/icon-152.png",
+      "sizes": "152x152",
+      "type": "image/png"
+    },
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-384.png",
+      "sizes": "384x384",
+      "type": "image/png"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "screenshots": [],
+  "shortcuts": [
+    {
+      "name": "新建对话",
+      "short_name": "对话",
+      "description": "开始一个新的AI对话",
+      "url": "/?action=chat",
+      "icons": [{ "src": "/icons/icon-96.png", "sizes": "96x96" }]
+    },
+    {
+      "name": "记忆管理",
+      "short_name": "记忆",
+      "description": "查看和管理AI记忆",
+      "url": "/?action=memory",
+      "icons": [{ "src": "/icons/icon-96.png", "sizes": "96x96" }]
+    }
+  ]
+}

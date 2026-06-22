@@ -1,0 +1,16 @@
+node_modules
+.next
+.git
+deploy/backups
+*.log
+.env
+upload
+screenshot-*.png
+verify-*.png
+public/verify-*.png
+public/generated
+tool-results
+agent-ctx
+db/*.db-journal
+db/*.db-wal
+db/*.db-shm
