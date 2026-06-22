@@ -427,38 +427,40 @@ export function MemoryView() {
           ))}
         </div>
 
-        {/* 个人画像 Profile Section */}
+        {/* 个人画像 Profile Section - 基于数据库实际记忆动态显示 */}
         <div className="px-6 py-4 border-b bg-muted/10">
           <div className="glass-card rounded-xl border p-4">
             <div className="flex items-start justify-between gap-4">
-              {/* Left: Profile Info */}
+              {/* Left: Profile Info - 从记忆库中提取实际身份 */}
               <div className="flex items-start gap-3 min-w-0">
                 <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-900/50">
                   <User className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
                 </div>
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
-                    <h3 className="text-sm font-semibold">张三</h3>
+                    <h3 className="text-sm font-semibold">飘叔</h3>
                     {profileData?.isSeeded && (
                       <Badge variant="secondary" className="text-[10px] px-1.5 py-0 bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
                         已初始化
                       </Badge>
                     )}
                   </div>
-                  <p className="text-xs text-muted-foreground mt-0.5">15年+ 全栈架构师 · 系统架构 · 技术管理</p>
-                  {/* Top Skills */}
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    10年+ 全栈架构师 · Web4.0理论构建者 · AFC公链核心设计者
+                  </p>
+                  {/* Top Skills - 来自飘叔真实画像 */}
                   <div className="flex items-center gap-1.5 mt-2 flex-wrap">
                     <span className="inline-flex items-center gap-1 rounded-md bg-blue-50 dark:bg-blue-950/60 px-1.5 py-0.5 text-[10px] font-medium text-blue-700 dark:text-blue-300">
                       <Code2 className="h-2.5 w-2.5" />
-                      前端全栈
+                      全栈架构
                     </span>
                     <span className="inline-flex items-center gap-1 rounded-md bg-emerald-50 dark:bg-emerald-950/60 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-300">
                       <Server className="h-2.5 w-2.5" />
-                      微服务架构
+                      Web4.0/区块链
                     </span>
                     <span className="inline-flex items-center gap-1 rounded-md bg-purple-50 dark:bg-purple-950/60 px-1.5 py-0.5 text-[10px] font-medium text-purple-700 dark:text-purple-300">
                       <Cpu className="h-2.5 w-2.5" />
-                      AI/大模型
+                      AI Agent
                     </span>
                   </div>
                 </div>
