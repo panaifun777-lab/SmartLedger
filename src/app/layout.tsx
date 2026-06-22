@@ -1,9 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import Script from "next/script";
 import "./globals.css";
-import { Toaster } from "@/components/ui/toaster";
-import { ThemeProvider } from "next-themes";
-import { SessionProvider } from "next-auth/react";
+import { Providers } from "@/components/providers";
 
 export const viewport: Viewport = {
   themeColor: "#059669",
@@ -47,13 +45,8 @@ export default function RootLayout({
         <link rel="manifest" href="/manifest.json" />
       </head>
       <body className="antialiased bg-background text-foreground">
-        <SessionProvider>
-          <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
-            {children}
-          </ThemeProvider>
-          <Toaster />
-          <Script src="/sw-register.js" strategy="afterInteractive" />
-        </SessionProvider>
+        <Providers>{children}</Providers>
+        <Script src="/sw-register.js" strategy="afterInteractive" />
       </body>
     </html>
   );
