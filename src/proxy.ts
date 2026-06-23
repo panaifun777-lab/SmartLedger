@@ -11,17 +11,10 @@
  *   - favicon, icons, sw, manifest, robots, generated, upload
  *
  * Everything else requires a valid session cookie.
- *
- * We deliberately do NOT use `next-auth/middleware` (withAuth) because it
- * depends on the deprecated middleware convention. Instead we do a direct
- * cookie presence check — the JWT signature is verified by NextAuth on
- * the API side, so an attacker forging a cookie header would still get
- * rejected on actual API calls.
  */
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
-/** Match paths that should bypass auth. */
 const PUBLIC_PATHS = [
   /^\/api\/auth\//,
   /^\/api\/health$/,
@@ -37,8 +30,6 @@ const PUBLIC_PATHS = [
   /^\/upload\//,
 ];
 
-/** NextAuth cookie name. v4 uses `next-auth.session-token` (HTTP) or
- *  `__Secure-next-auth.session-token` (HTTPS). We check both. */
 function hasSessionCookie(req: NextRequest): boolean {
   const cookies = req.cookies;
   if (cookies.has("next-auth.session-token")) return true;
@@ -46,21 +37,46 @@ function hasSessionCookie(req: NextRequest): boolean {
   return false;
 }
 
+/**
+ * Resolve the canonical app origin.
+ *
+ * Priority:
+ *   1. NEXTAUTH_URL env var (most reliable — explicitly configured)
+ *   2. X-Forwarded-Proto + X-Forwarded-Host headers (set by reverse proxy)
+ *   3. req.nextUrl.origin (last resort — may be 0.0.0.0 inside Docker)
+ *
+ * Without this, when Caddy proxies to `avatar-agent:3000`, Next.js sees
+ * the request as coming from 0.0.0.0:3000 and generates redirect URLs
+ * pointing at 0.0.0.0:3000 — which the user's browser cannot reach.
+ */
+function getCanonicalOrigin(req: NextRequest): string {
+  const envUrl = process.env.NEXTAUTH_URL?.trim();
+  if (envUrl) return envUrl.replace(/\/$/, "");
+
+  const xfp = req.headers.get("x-forwarded-proto");
+  const xfh = req.headers.get("x-forwarded-host");
+  if (xfh) {
+    const proto = xfp || "https";
+    return `${proto}://${xfh}`;
+  }
+
+  return req.nextUrl.origin;
+}
+
 export function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
-  // Public paths bypass auth
   for (const pattern of PUBLIC_PATHS) {
     if (pattern.test(pathname)) {
       return NextResponse.next();
     }
   }
 
-  // Authed paths require a session cookie
   if (!hasSessionCookie(req)) {
-    const loginUrl = new URL("/login", req.url);
-    // Preserve the original URL so we can redirect back after login
-    loginUrl.searchParams.set("callbackUrl", req.url);
+    const origin = getCanonicalOrigin(req);
+    const loginUrl = new URL("/login", origin);
+    // Preserve the original path (not the full URL with 0.0.0.0 host)
+    loginUrl.searchParams.set("callbackUrl", `${origin}${req.nextUrl.pathname}${req.nextUrl.search}`);
     return NextResponse.redirect(loginUrl);
   }
 
