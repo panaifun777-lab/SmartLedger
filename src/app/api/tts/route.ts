@@ -17,17 +17,22 @@ export async function POST(request: NextRequest) {
       input: inputText,
       voice: voice,
       speed: Math.max(0.5, Math.min(2.0, speed)),
-      response_format: 'mp3',
       stream: false,
     });
 
     const arrayBuffer = await response.arrayBuffer();
     const buffer = Buffer.from(new Uint8Array(arrayBuffer));
 
+    // 智谱 cogtts 返回的是 wav 格式 (PCM), OpenAI TTS 返回 mp3
+    // 通过检查 RIFF 头判断是否 wav
+    const isWav = buffer.length > 12 &&
+      buffer[0] === 0x52 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x46; // "RIFF"
+    const contentType = isWav ? 'audio/wav' : 'audio/mpeg';
+
     return new NextResponse(buffer, {
       status: 200,
       headers: {
-        'Content-Type': 'audio/mpeg',
+        'Content-Type': contentType,
         'Content-Length': buffer.length.toString(),
         'Cache-Control': 'no-cache',
       },

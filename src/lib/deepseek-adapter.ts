@@ -495,8 +495,6 @@ export class MultiBackendAdapter {
                 model: 'cogtts',
                 input: params.input,
                 voice: params.voice || 'tongtong',
-                speed: params.speed || 1.0,
-                response_format: 'mp3',
               }),
             });
             if (resp.ok) {
