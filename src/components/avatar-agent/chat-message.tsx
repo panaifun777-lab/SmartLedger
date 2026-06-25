@@ -75,7 +75,7 @@ export function ChatMessage({ message }: ChatMessageProps) {
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.2, ease: 'easeOut' }}
       className={cn(
-        'flex gap-3 px-4 py-3',
+        'flex gap-2 sm:gap-3 px-2 py-2 sm:px-4 sm:py-3',
         isUser ? 'flex-row-reverse' : 'flex-row'
       )}
     >
@@ -96,7 +96,7 @@ export function ChatMessage({ message }: ChatMessageProps) {
       {/* Message Content */}
       <div
         className={cn(
-          'flex flex-col gap-1 max-w-[75%] min-w-0',
+          'flex flex-col gap-1 max-w-[85%] sm:max-w-[80%] md:max-w-[75%] min-w-0',
           isUser ? 'items-end' : 'items-start'
         )}
       >
@@ -106,7 +106,7 @@ export function ChatMessage({ message }: ChatMessageProps) {
             {isUser ? '你' : 'AVATAR'}
           </span>
           {message.model && !isUser && (
-            <span className="text-[10px] text-muted-foreground/60">
+            <span className="text-[10px] text-muted-foreground/60 hidden sm:inline">
               {message.model}
             </span>
           )}
@@ -124,7 +124,7 @@ export function ChatMessage({ message }: ChatMessageProps) {
         {/* Content bubble */}
         <div
           className={cn(
-            'rounded-2xl px-4 py-2.5 text-sm leading-relaxed break-words',
+            'rounded-2xl px-3 py-2 sm:px-4 sm:py-2.5 text-sm leading-relaxed break-words',
             isUser
               ? 'bg-emerald-600 text-white rounded-br-md whitespace-pre-wrap dark:bg-emerald-700/80 dark:backdrop-blur-sm'
               : 'glass-card bg-card border rounded-bl-md text-card-foreground'
@@ -183,11 +183,11 @@ export function ChatMessage({ message }: ChatMessageProps) {
             </Tooltip>
           </TooltipProvider>
 
-          {/* Tool calls badge */}
+          {/* Tool calls badge - hidden on very small screens to save space */}
           {message.toolsCalled && message.toolsCalled.length > 0 && (
             <Badge
               variant="secondary"
-              className="h-5 gap-1 text-[10px] px-1.5 bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800"
+              className="h-5 gap-1 text-[10px] px-1.5 bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800 hidden xs:inline-flex sm:inline-flex"
             >
               <Wrench className="h-2.5 w-2.5" />
               {message.toolsCalled.length} 工具

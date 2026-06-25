@@ -25,6 +25,8 @@ import {
   Mic,
   MicOff,
   ImageIcon,
+  Paperclip,
+  FileText,
   X,
   ChevronDown,
   Check,
@@ -144,7 +146,8 @@ export function ChatView() {
   const [pendingMessage, setPendingMessage] = useState<string | null>(null)
   const [isRecording, setIsRecording] = useState(false)
   const [isTranscribing, setIsTranscribing] = useState(false)
-  const [pendingImage, setPendingImage] = useState<{ dataUrl: string; base64: string } | null>(null)
+  const [pendingImage, setPendingImage] = useState<{ dataUrl: string; base64: string; name?: string } | null>(null)
+  const [pendingFile, setPendingFile] = useState<{ name: string; size: number; type: string; content: string } | null>(null)
   const [isAnalyzingImage, setIsAnalyzingImage] = useState(false)
   const [knowledgeRefCount, setKnowledgeRefCount] = useState<number>(0)
   const [knowledgeSources, setKnowledgeSources] = useState<string[]>([])
@@ -189,7 +192,8 @@ export function ChatView() {
 
   const handleSend = useCallback(async (overrideMessage?: string) => {
     const messageContent = (overrideMessage ?? input).trim()
-    if (!messageContent || isSending) return
+    // Allow send if there's text, an image, or a file
+    if ((!messageContent && !pendingImage && !pendingFile) || isSending) return
 
     setInput('')
     setStreamingContent('')
@@ -226,17 +230,43 @@ export function ChatView() {
       }
     }
 
+    // Handle general file: extract content and prepend to message
+    let fileContentPrefix = ''
+    let pendingFileCleared = false
+    if (pendingFile) {
+      const file = pendingFile
+      // For text files, content is the raw text (may be very long, cap at 8000 chars)
+      const isTextContent = file.type.startsWith('text/') ||
+        /\.(txt|md|markdown|csv|json|js|ts|tsx|jsx|py|go|rs|java|c|cpp|h|sh|yml|yaml|xml|html|css|sql|env)$/i.test(file.name)
+      if (isTextContent && file.content && !file.content.startsWith('data:')) {
+        const truncated = file.content.length > 8000
+          ? file.content.substring(0, 8000) + '\n\n[... 文件内容过长,已截断 ...]'
+          : file.content
+        fileContentPrefix = `📄 **文件内容 (${file.name}):**\n\n\`\`\`\n${truncated}\n\`\`\`\n\n---\n\n`
+      } else {
+        // Binary file (PDF/Word/image-as-file): just note it
+        fileContentPrefix = `📎 **附件: ${file.name}** (${(file.size / 1024).toFixed(1)} KB, ${file.type || '未知类型'})\n\n`
+      }
+      setPendingFile(null)
+      pendingFileCleared = true
+    }
+
     // Reset textarea height
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto'
     }
+
+    // Compose display content for user bubble
+    let displayContent = messageContent
+    if (pendingImage) displayContent = `[图片] ${messageContent}`
+    if (pendingFileCleared) displayContent = `[文件] ${messageContent || '请分析此文件'}`
 
     // Add user message immediately for responsive UX
     const userMessage = {
       id: `msg-user-${Date.now()}`,
       conversationId: currentConversationId || '',
       role: 'user' as const,
-      content: pendingImage ? `[图片] ${messageContent}` : messageContent,
+      content: displayContent,
       toolsCalled: pendingImage ? ['vlm'] : [],
       memoryRefs: [],
       createdAt: new Date().toISOString(),
@@ -244,10 +274,12 @@ export function ChatView() {
     addMessage(userMessage)
     setIsSending(true)
 
-    // The actual message to send to LLM (prepend image analysis if any)
-    const llmMessage = imageAnalysisPrefix
-      ? `${imageAnalysisPrefix}用户关于图片的问题: ${messageContent}`
-      : messageContent
+    // The actual message to send to LLM (prepend image analysis + file content)
+    const llmMessage = [
+      imageAnalysisPrefix,
+      fileContentPrefix,
+      messageContent || (fileContentPrefix ? '请分析以上文件内容' : ''),
+    ].filter(Boolean).join('')
 
     try {
       // Use the orchestration endpoint
@@ -658,7 +690,7 @@ export function ChatView() {
     } finally {
       setIsSending(false)
     }
-  }, [input, isSending, selectedTools, selectedModelId, currentConversationId, addMessage, setIsSending, setCurrentConversationId, pendingImage])
+  }, [input, isSending, selectedTools, selectedModelId, currentConversationId, addMessage, setIsSending, setCurrentConversationId, pendingImage, pendingFile])
 
   // Keep ref in sync
   handleSendRef.current = handleSend
@@ -741,7 +773,7 @@ export function ChatView() {
     reader.onload = (event) => {
       const dataUrl = event.target?.result as string
       const base64 = dataUrl.split(',')[1]
-      setPendingImage({ dataUrl, base64 })
+      setPendingImage({ dataUrl, base64, name: file.name })
       // Auto-select VLM tool
       if (!selectedTools.includes('vlm')) {
         setSelectedTools((prev) => [...prev, 'vlm'])
@@ -750,6 +782,64 @@ export function ChatView() {
     reader.readAsDataURL(file)
     // Reset input so same file can be re-selected
     e.target.value = ''
+  }
+
+  // General file upload handler (PDF / Word / TXT / Markdown / CSV / JSON / code)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    // 20MB limit
+    if (file.size > 20 * 1024 * 1024) {
+      toast({ title: '文件过大', description: '文件大小不能超过 20MB', variant: 'destructive' })
+      e.target.value = ''
+      return
+    }
+
+    const reader = new FileReader()
+    reader.onload = (event) => {
+      const result = event.target?.result as string
+      // For text-based files, result is the text content
+      // For binary files (PDF/Word), we read as base64 data URL
+      let content = result
+      let isText = false
+      if (typeof result === 'string') {
+        if (result.startsWith('data:')) {
+          // Binary file read as data URL — extract base64
+          content = result.split(',')[1] || result
+          isText = false
+        } else {
+          // Plain text content
+          isText = true
+        }
+      }
+      setPendingFile({
+        name: file.name,
+        size: file.size,
+        type: file.type || 'application/octet-stream',
+        content: isText ? result : content,
+      })
+      toast({
+        title: '文件已选择',
+        description: `${file.name} (${(file.size / 1024).toFixed(1)} KB) — 发送时将提取内容`,
+      })
+    }
+
+    // Read text files as text, binary files as data URL
+    const textExtensions = ['.txt', '.md', '.markdown', '.csv', '.json', '.js', '.ts', '.tsx', '.jsx', '.py', '.go', '.rs', '.java', '.c', '.cpp', '.h', '.sh', '.yml', '.yaml', '.xml', '.html', '.css', '.sql', '.env']
+    const isTextFile = textExtensions.some(ext => file.name.toLowerCase().endsWith(ext)) ||
+                       file.type.startsWith('text/')
+    if (isTextFile) {
+      reader.readAsText(file)
+    } else {
+      reader.readAsDataURL(file)
+    }
+    e.target.value = ''
+  }
+
+  const removePendingFile = () => {
+    setPendingFile(null)
   }
 
   const charCount = input.length
@@ -792,7 +882,7 @@ export function ChatView() {
                 // Use pendingMessage state to trigger auto-send via useEffect
                 setPendingMessage(prompt.text)
               }}
-              className="glass-card flex flex-col items-start rounded-xl border px-4 py-3 text-left hover:bg-accent hover:border-emerald-200 dark:hover:border-emerald-800 transition-all duration-200 min-w-[160px]"
+              className="glass-card flex flex-col items-start rounded-xl border px-4 py-3 text-left hover:bg-accent hover:border-emerald-200 dark:hover:border-emerald-800 transition-all duration-200 min-w-[140px] sm:min-w-[160px]"
             >
               <span className="text-lg mb-1">{prompt.icon}</span>
               <span className="text-sm font-medium text-foreground">{prompt.text}</span>
@@ -831,7 +921,7 @@ export function ChatView() {
                       currentModel.pricing === 'free' ? 'bg-emerald-500' :
                       currentModel.pricing === 'premium' ? 'bg-amber-500' : 'bg-sky-500'
                     }`} />
-                    <span className="max-w-[80px] truncate">{currentModel.name}</span>
+                    <span className="max-w-[60px] sm:max-w-[80px] truncate">{currentModel.name}</span>
                     <ChevronDown className="h-3 w-3 text-muted-foreground" />
                   </button>
                 </PopoverTrigger>
@@ -1046,14 +1136,14 @@ export function ChatView() {
 
           {/* Image preview */}
           {pendingImage && (
-            <div className="relative inline-flex items-center gap-2 rounded-lg border bg-muted/30 p-2">
+            <div className="relative inline-flex items-center gap-2 rounded-lg border bg-muted/30 p-2 max-w-full">
               <img
                 src={pendingImage.dataUrl}
                 alt="待分析图片"
-                className="h-16 w-16 rounded-md object-cover"
+                className="h-16 w-16 rounded-md object-cover shrink-0"
               />
-              <div className="flex flex-col gap-0.5">
-                <span className="text-xs font-medium">图片已选择</span>
+              <div className="flex flex-col gap-0.5 min-w-0">
+                <span className="text-xs font-medium truncate">{pendingImage.name || '图片已选择'}</span>
                 <span className="text-[10px] text-muted-foreground">发送时将自动分析图片</span>
               </div>
               <Button
@@ -1070,8 +1160,31 @@ export function ChatView() {
             </div>
           )}
 
-          {/* Textarea + action buttons row */}
-          <div className="flex items-end gap-2">
+          {/* File preview (PDF / Word / TXT / etc.) */}
+          {pendingFile && (
+            <div className="relative inline-flex items-center gap-2 rounded-lg border bg-muted/30 p-2 max-w-full">
+              <div className="h-12 w-12 rounded-md bg-blue-100 dark:bg-blue-950 flex items-center justify-center shrink-0">
+                <Paperclip className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+              </div>
+              <div className="flex flex-col gap-0.5 min-w-0">
+                <span className="text-xs font-medium truncate max-w-[200px]">{pendingFile.name}</span>
+                <span className="text-[10px] text-muted-foreground">
+                  {(pendingFile.size / 1024).toFixed(1)} KB · 发送时将提取内容
+                </span>
+              </div>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6 absolute -top-1.5 -right-1.5 rounded-full bg-background border shadow-sm"
+                onClick={removePendingFile}
+              >
+                <X className="h-3 w-3" />
+              </Button>
+            </div>
+          )}
+
+          {/* Textarea + action buttons row — responsive: wraps on small screens */}
+          <div className="flex items-end gap-1.5 sm:gap-2">
             {/* Action buttons on the left */}
             <div className="flex items-center gap-1 pb-0.5">
               {/* Mic button for ASR */}
@@ -1113,6 +1226,25 @@ export function ChatView() {
                 className="hidden"
                 onChange={handleImageSelect}
               />
+
+              {/* General file upload button (PDF / Word / TXT / code / etc.) */}
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-9 w-9 shrink-0"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isSending || !!pendingFile}
+                title="上传文件 (PDF/Word/TXT/代码等)"
+              >
+                <Paperclip className="h-4 w-4 text-muted-foreground" />
+              </Button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".pdf,.doc,.docx,.txt,.md,.markdown,.csv,.json,.js,.ts,.tsx,.jsx,.py,.go,.rs,.java,.c,.cpp,.h,.sh,.yml,.yaml,.xml,.html,.css,.sql,.env,image/*"
+                className="hidden"
+                onChange={handleFileSelect}
+              />
             </div>
 
             {/* Textarea */}
@@ -1129,7 +1261,7 @@ export function ChatView() {
                 />
                 <div className="absolute bottom-2 right-2 flex items-center gap-1">
                   <span
-                    className={`text-[10px] ${
+                    className={`text-[10px] hidden sm:inline ${
                       isOverLimit ? 'text-destructive' : 'text-muted-foreground/40'
                     }`}
                   >
@@ -1139,16 +1271,16 @@ export function ChatView() {
               </div>
             </div>
 
-            {/* Send button */}
+            {/* Send button — icon-only on small screens, icon+label on sm+ */}
             <Button
               data-send-button
               onClick={() => handleSend()}
-              disabled={(!input.trim() && !pendingImage) || isSending || isOverLimit || isAnalyzingImage}
+              disabled={(!input.trim() && !pendingImage && !pendingFile) || isSending || isOverLimit || isAnalyzingImage}
               size="sm"
-              className="gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white h-9 shrink-0"
+              className="gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white h-9 shrink-0 px-2 sm:px-3"
             >
               <Send className="h-3.5 w-3.5" />
-              发送
+              <span className="hidden sm:inline">发送</span>
             </Button>
           </div>
         </div>

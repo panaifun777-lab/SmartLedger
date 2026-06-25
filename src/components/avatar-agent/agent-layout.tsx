@@ -340,7 +340,7 @@ export function AgentLayout() {
       <div className="flex h-screen w-full overflow-hidden bg-background dark:bg-transparent relative">
         <FlowingBackground />
         <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>
-          <SheetContent side="left" className="w-[280px] p-0">
+          <SheetContent side="left" className="w-[85vw] max-w-[280px] p-0">
             <SheetTitle className="sr-only">导航菜单</SheetTitle>
             <SidebarContent onNavClick={() => setSidebarOpen(false)} />
           </SheetContent>
