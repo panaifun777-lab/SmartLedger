@@ -154,11 +154,11 @@ export function MarkdownRenderer({ content, className }: MarkdownRendererProps) 
             }
 
             return (
-              <div className="group relative my-3 overflow-hidden rounded-lg border border-border">
+              <div className="group relative my-3 overflow-x-auto overflow-y-hidden max-h-[400px] rounded-lg border border-border">
                 {/* Header bar with language label */}
                 <div
                   className={cn(
-                    'flex items-center gap-2 px-4 py-1.5 text-xs font-medium',
+                    'flex items-center gap-2 px-4 py-1.5 text-xs font-medium sticky top-0 z-10',
                     isDark
                       ? 'bg-[#282c34] text-slate-400 border-b border-slate-700'
                       : 'bg-[#fafafa] text-slate-500 border-b border-slate-200'

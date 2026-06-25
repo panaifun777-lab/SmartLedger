@@ -1,11 +1,11 @@
 'use client'
 
-import React, { useState } from 'react'
+import React, { useState, useCallback } from 'react'
 import type { Message } from '@/stores'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
-import { Bot, User, Info, Wrench, Brain, ChevronDown, ChevronRight } from 'lucide-react'
+import { Bot, User, Info, Wrench, Brain, ChevronDown, ChevronRight, Copy, Check } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { formatDistanceToNow } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
@@ -40,6 +40,31 @@ export function ChatMessage({ message }: ChatMessageProps) {
   const isSystem = message.role === 'system'
   const prefersReducedMotion = useReducedMotion()
   const [stepsExpanded, setStepsExpanded] = useState(false)
+  const [copied, setCopied] = useState(false)
+
+  const handleCopyMessage = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(message.content)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      // Fallback for older browsers / non-secure contexts
+      const textarea = document.createElement('textarea')
+      textarea.value = message.content
+      textarea.style.position = 'fixed'
+      textarea.style.opacity = '0'
+      document.body.appendChild(textarea)
+      textarea.select()
+      try {
+        document.execCommand('copy')
+        setCopied(true)
+        setTimeout(() => setCopied(false), 2000)
+      } catch {
+        // ignore
+      }
+      document.body.removeChild(textarea)
+    }
+  }, [message.content])
 
   const hasOrchestration = !!message.orchestrationPlan
   const plan = message.orchestrationPlan
@@ -121,19 +146,56 @@ export function ChatMessage({ message }: ChatMessageProps) {
           )}
         </div>
 
-        {/* Content bubble */}
-        <div
-          className={cn(
-            'rounded-2xl px-3 py-2 sm:px-4 sm:py-2.5 text-sm leading-relaxed break-words',
-            isUser
-              ? 'bg-emerald-600 text-white rounded-br-md whitespace-pre-wrap dark:bg-emerald-700/80 dark:backdrop-blur-sm'
-              : 'glass-card bg-card border rounded-bl-md text-card-foreground'
-          )}
-        >
-          {isUser ? (
-            message.content
-          ) : (
-            <MarkdownRenderer content={message.content} />
+        {/* Content bubble - assistant messages get max-height + vertical scroll + copy button */}
+        <div className="relative group/msg">
+          <div
+            className={cn(
+              'rounded-2xl px-3 py-2 sm:px-4 sm:py-2.5 text-sm leading-relaxed break-words',
+              isUser
+                ? 'bg-emerald-600 text-white rounded-br-md whitespace-pre-wrap dark:bg-emerald-700/80 dark:backdrop-blur-sm'
+                : 'glass-card bg-card border rounded-bl-md text-card-foreground overflow-y-auto overflow-x-hidden max-h-[60vh]'
+            )}
+          >
+            {isUser ? (
+              message.content
+            ) : (
+              <MarkdownRenderer content={message.content} />
+            )}
+          </div>
+          {/* Copy button for assistant messages - top-right, visible on hover */}
+          {!isUser && message.content && (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    onClick={handleCopyMessage}
+                    className={cn(
+                      'absolute top-1 right-1 z-10 flex items-center gap-1 rounded-md px-1.5 py-1 text-[10px] transition-all',
+                      'opacity-0 group-hover/msg:opacity-100 focus:opacity-100',
+                      copied
+                        ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400'
+                        : 'bg-muted/80 text-muted-foreground hover:bg-muted hover:text-foreground'
+                    )}
+                    aria-label={copied ? '已复制' : '复制'}
+                  >
+                    {copied ? (
+                      <>
+                        <Check className="h-3 w-3" />
+                        <span className="hidden sm:inline">已复制</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="h-3 w-3" />
+                        <span className="hidden sm:inline">复制</span>
+                      </>
+                    )}
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="left">
+                  {copied ? '已复制到剪贴板' : '复制整条回复'}
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
           )}
         </div>
 
