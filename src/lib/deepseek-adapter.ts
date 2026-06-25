@@ -126,22 +126,50 @@ interface SearchResult {
   [key: string]: unknown;
 }
 
-/** ZHIPU JWT token generator (HS256, valid 1 hour). */
+/** ZHIPU JWT token generator (HS256, valid 1 hour).
+ *
+ * Follows ZHIPU's official spec:
+ *   header:    {"alg": "HS256", "sign_type": "SIGN"}
+ *   payload:   {"api_key": <id>, "exp": <ms>, "timestamp": <ms>}
+ *   encoding:  urlsafe base64 (no padding) for all 3 parts
+ *   exp/timestamp are in MILLISECONDS, not seconds
+ *
+ * Reference: https://open.bigmodel.cn/dev/api#nosdk
+ */
 async function zhipuJwt(apiKey: string): Promise<string> {
   const [id, secret] = apiKey.split('.');
   if (!id || !secret) {
     throw new Error('Invalid ZHIPU_API_KEY format (expected id.secret)');
   }
-  // Use Web Crypto API (available in Node 18+ and Bun)
+
   const enc = new TextEncoder();
-  const header = btoa(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
-  const now = Math.floor(Date.now() / 1000);
-  const payload = btoa(JSON.stringify({
+
+  // urlsafe base64 (no padding) — used for all 3 parts of the JWT
+  function b64url(data: ArrayBuffer | Uint8Array): string {
+    const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
+    let binary = '';
+    for (let i = 0; i < bytes.length; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    return btoa(binary)
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '');
+  }
+
+  const headerJson = JSON.stringify({ alg: 'HS256', sign_type: 'SIGN' });
+  // exp = 1 hour from now in MILLISECONDS; timestamp in MILLISECONDS
+  const nowMs = Date.now();
+  const payloadJson = JSON.stringify({
     api_key: id,
-    exp: now + 3600,
-    timestamp: now,
-  }));
-  const signInput = `${header}.${payload}`;
+    exp: nowMs + 3600 * 1000,
+    timestamp: nowMs,
+  });
+
+  const headerB64 = b64url(enc.encode(headerJson));
+  const payloadB64 = b64url(enc.encode(payloadJson));
+  const signInput = `${headerB64}.${payloadB64}`;
+
   const key = await crypto.subtle.importKey(
     'raw',
     enc.encode(secret),
@@ -149,11 +177,9 @@ async function zhipuJwt(apiKey: string): Promise<string> {
     false,
     ['sign']
   );
-  const sig = await crypto.subtle.sign('HMAC', key, enc.encode(signInput));
-  const sigB64 = btoa(String.fromCharCode(...new Uint8Array(sig)))
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/, '');
+  const sigBytes = await crypto.subtle.sign('HMAC', key, enc.encode(signInput));
+  const sigB64 = b64url(sigBytes);
+
   return `${signInput}.${sigB64}`;
 }
 
