@@ -52,6 +52,7 @@ import {
 import { useToast } from '@/hooks/use-toast'
 import { useTheme } from 'next-themes'
 import { PWAMobileGuide } from './pwa-mobile-guide'
+import { ApiKeysManager } from './api-keys-manager'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -1589,6 +1590,9 @@ export function SettingsView() {
               <PWAMobileGuide />
             </CardContent>
           </Card>
+
+          {/* AI API Keys Manager — enables image gen / VLM / TTS / ASR */}
+          <ApiKeysManager />
 
           {/* About */}
           <Card className="glass-card">

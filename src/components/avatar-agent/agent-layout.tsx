@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useEffect, useState } from 'react'
-import { useAgentStore, useChatStore, type MemoryTypeFilter } from '@/stores'
+import { useAgentStore, useChatStore, type MemoryTypeFilter, type ActiveView } from '@/stores'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { ConversationList } from './conversation-list'
 import { ChatView } from './chat-view'
@@ -26,6 +26,8 @@ import {
   Menu,
   Plus,
   ChevronLeft,
+  ChevronRight,
+  ChevronDown,
   Sparkles,
   LogOut,
   UserCircle,
@@ -34,33 +36,100 @@ import {
   Clock,
   Scale,
   Calendar,
-  Tag,
+  Target,
+  FolderKanban,
+  CalendarClock,
+  User,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import type { ActiveView } from '@/stores'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { FlowingBackground } from './flowing-background'
 import { PWAInstallPrompt } from './pwa-install-prompt'
 import { useSession, signOut } from 'next-auth/react'
 
-const navItems: { view: ActiveView; icon: React.ElementType; label: string }[] = [
+// ── Top-level navigation items (always visible) ─────────────
+const topNavItems: { view: ActiveView; icon: React.ElementType; label: string }[] = [
   { view: 'chat', icon: MessageSquare, label: '对话' },
-  { view: 'memory', icon: Brain, label: '记忆' },
-  { view: 'knowledge', icon: BookOpen, label: '知识库' },
-  { view: 'runs', icon: Zap, label: '运行记录' },
   { view: 'dashboard', icon: LayoutDashboard, label: '仪表盘' },
+]
+
+// ── Sidebar sections — each can be collapsed/expanded ───────
+interface SidebarSection {
+  id: string
+  label: string
+  icon: React.ElementType
+  /** Top-level view to navigate to when section header clicked */
+  view?: ActiveView
+  /** Sub-items inside the section */
+  items?: { view?: ActiveView; label: string; icon: React.ElementType; color?: string; filter?: MemoryTypeFilter }[]
+}
+
+const sidebarSections: SidebarSection[] = [
+  {
+    id: 'profile',
+    label: '人格画像',
+    icon: User,
+    view: 'profile',
+  },
+  {
+    id: 'memory',
+    label: '记忆单元',
+    icon: Brain,
+    view: 'memory',
+    items: [
+      { label: '事实', icon: UserCircle, color: 'text-blue-500', filter: 'fact' },
+      { label: '偏好', icon: Heart, color: 'text-rose-500', filter: 'preference' },
+      { label: '技能', icon: Wrench, color: 'text-emerald-500', filter: 'skill' },
+      { label: '规则', icon: Scale, color: 'text-amber-500', filter: 'rule' },
+      { label: '上下文', icon: Clock, color: 'text-violet-500', filter: 'context' },
+      { label: '事件', icon: Calendar, color: 'text-cyan-500', filter: 'event' },
+    ],
+  },
+  {
+    id: 'tasks',
+    label: '任务',
+    icon: Target,
+    view: 'tasks',
+  },
+  {
+    id: 'conversations',
+    label: '对话总结',
+    icon: MessageSquare,
+    view: 'conversations',
+  },
+  {
+    id: 'projects',
+    label: '项目分类',
+    icon: FolderKanban,
+    view: 'projects',
+  },
+  {
+    id: 'schedule',
+    label: '计划推送',
+    icon: CalendarClock,
+    view: 'schedule',
+  },
+  {
+    id: 'knowledge',
+    label: '知识库',
+    icon: BookOpen,
+    view: 'knowledge',
+  },
+  {
+    id: 'runs',
+    label: '运行记录',
+    icon: Zap,
+    view: 'runs',
+  },
+]
+
+const bottomNavItems: { view: ActiveView; icon: React.ElementType; label: string }[] = [
   { view: 'settings', icon: Settings, label: '设置' },
 ]
 
-const memoryCategories: { type: MemoryTypeFilter; label: string; icon: React.ElementType; color: string }[] = [
-  { type: 'fact', label: '事实', icon: UserCircle, color: 'text-blue-500' },
-  { type: 'preference', label: '偏好', icon: Heart, color: 'text-rose-500' },
-  { type: 'skill', label: '技能', icon: Wrench, color: 'text-emerald-500' },
-  { type: 'rule', label: '规则', icon: Scale, color: 'text-amber-500' },
-  { type: 'context', label: '上下文', icon: Clock, color: 'text-violet-500' },
-  { type: 'event', label: '事件', icon: Calendar, color: 'text-cyan-500' },
-]
-
+/** Fetch memory counts by type from the dashboard API. */
 function useMemoryCounts() {
   const [counts, setCounts] = useState<Record<string, number>>({})
   const [total, setTotal] = useState(0)
@@ -92,66 +161,115 @@ function useMemoryCounts() {
   return { counts, total }
 }
 
-function MemoryCategoryNav({ onNavigate }: { onNavigate?: () => void }) {
-  const { activeView, memoryTypeFilter, goToMemoryWithType, setMemoryTypeFilter } = useAgentStore()
+/** A collapsible sidebar section with header + sub-items. */
+function SidebarSection({
+  section,
+  onNavigate,
+}: {
+  section: SidebarSection
+  onNavigate?: () => void
+}) {
+  const { activeView, memoryTypeFilter, setActiveView, goToMemoryWithType, expandedSections, toggleSection } = useAgentStore()
   const { counts, total } = useMemoryCounts()
+  const isExpanded = expandedSections[section.id] ?? false
+  const hasItems = !!section.items?.length
 
-  if (activeView !== 'memory' && memoryTypeFilter === 'all') {
-    return null
+  const handleHeaderClick = () => {
+    if (hasItems) {
+      toggleSection(section.id)
+    } else if (section.view) {
+      setActiveView(section.view)
+      onNavigate?.()
+    }
   }
 
   return (
-    <div className="px-3 py-2">
-      <div className="px-2 mb-1.5 flex items-center justify-between">
-        <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">
-          记忆分类
-        </span>
-        <span className="text-[10px] text-muted-foreground/60">{total}</span>
-      </div>
-      <div className="flex flex-col gap-0.5">
-        <button
-          onClick={() => {
-            setMemoryTypeFilter('all')
-            onNavigate?.()
-          }}
-          className={cn(
-            'flex items-center gap-2 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors',
-            'hover:bg-sidebar-accent',
-            memoryTypeFilter === 'all' && activeView === 'memory'
-              ? 'bg-emerald-600/10 text-emerald-700 dark:text-emerald-400'
-              : 'text-sidebar-foreground/70'
-          )}
-        >
-          <Tag className="h-3.5 w-3.5" />
-          全部
-          <span className="ml-auto text-[10px] text-muted-foreground/70">{total}</span>
-        </button>
-        {memoryCategories.map((cat) => {
-          const Icon = cat.icon
-          const count = counts[cat.type] || 0
-          const isActive = memoryTypeFilter === cat.type && activeView === 'memory'
-          return (
+    <div className="px-2">
+      <button
+        onClick={handleHeaderClick}
+        className={cn(
+          'flex items-center gap-2 w-full rounded-md px-2.5 py-1.5 text-xs font-semibold transition-colors',
+          'hover:bg-sidebar-accent',
+          activeView === section.view
+            ? 'bg-emerald-600/10 text-emerald-700 dark:text-emerald-400'
+            : 'text-sidebar-foreground/80'
+        )}
+      >
+        <section.icon className={cn('h-3.5 w-3.5', activeView === section.view && 'text-emerald-600 dark:text-emerald-400')} />
+        <span className="flex-1 text-left">{section.label}</span>
+        {/* Count badge for memory section */}
+        {section.id === 'memory' && total > 0 && (
+          <span className="text-[10px] text-muted-foreground/70">{total}</span>
+        )}
+        {/* Expand/collapse chevron for sections with sub-items */}
+        {hasItems && (
+          <ChevronRight
+            className={cn(
+              'h-3 w-3 text-muted-foreground/60 transition-transform',
+              isExpanded && 'rotate-90'
+            )}
+          />
+        )}
+      </button>
+
+      {/* Sub-items */}
+      {hasItems && isExpanded && (
+        <div className="ml-3 mt-0.5 mb-1 flex flex-col gap-0.5 border-l border-sidebar-border/40 pl-2">
+          {/* "All" link */}
+          {section.id === 'memory' && (
             <button
-              key={cat.type}
               onClick={() => {
-                goToMemoryWithType(cat.type)
+                setActiveView('memory')
                 onNavigate?.()
               }}
               className={cn(
-                'flex items-center gap-2 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors',
+                'flex items-center gap-2 rounded-md px-2 py-1 text-[11px] font-medium transition-colors',
                 'hover:bg-sidebar-accent',
-                isActive
+                memoryTypeFilter === 'all' && activeView === 'memory'
                   ? 'bg-emerald-600/10 text-emerald-700 dark:text-emerald-400'
-                  : 'text-sidebar-foreground/70'
+                  : 'text-sidebar-foreground/60'
               )}
             >
-              <Icon className={cn('h-3.5 w-3.5', cat.color)} />
-              {cat.label}
-              <span className="ml-auto text-[10px] text-muted-foreground/70">{count}</span>
+              <BookOpen className="h-3 w-3" />
+              全部记忆
             </button>
-          )
-        })}
-      </div>
+          )}
+          {section.items?.map((item) => {
+            const Icon = item.icon
+            const isActive =
+              section.id === 'memory'
+                ? memoryTypeFilter === item.filter && activeView === 'memory'
+                : activeView === section.view
+            const count = item.filter ? counts[item.filter] || 0 : 0
+            return (
+              <button
+                key={item.label}
+                onClick={() => {
+                  if (section.id === 'memory' && item.filter) {
+                    goToMemoryWithType(item.filter)
+                  } else if (section.view) {
+                    setActiveView(section.view)
+                  }
+                  onNavigate?.()
+                }}
+                className={cn(
+                  'flex items-center gap-2 rounded-md px-2 py-1 text-[11px] font-medium transition-colors',
+                  'hover:bg-sidebar-accent',
+                  isActive
+                    ? 'bg-emerald-600/10 text-emerald-700 dark:text-emerald-400'
+                    : 'text-sidebar-foreground/60'
+                )}
+              >
+                <Icon className={cn('h-3 w-3', item.color)} />
+                {item.label}
+                {count > 0 && (
+                  <span className="ml-auto text-[10px] text-muted-foreground/60">{count}</span>
+                )}
+              </button>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }
@@ -204,7 +322,7 @@ function UserSection() {
 }
 
 function SidebarContent({ onNavClick }: { onNavClick?: () => void }) {
-  const { activeView, setActiveView } = useAgentStore()
+  const { activeView, setActiveView, sidebarCollapsed, setSidebarCollapsed } = useAgentStore()
   const { addConversation, setCurrentConversationId, loadConversations } = useChatStore()
 
   useEffect(() => {
@@ -233,50 +351,71 @@ function SidebarContent({ onNavClick }: { onNavClick?: () => void }) {
 
   return (
     <div className="flex h-full flex-col bg-sidebar dark:bg-sidebar/90 text-sidebar-foreground">
-      <div className="flex items-center gap-3 px-4 py-5">
-        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-600 text-white">
+      {/* Logo Header + collapse button */}
+      <div className="flex items-center gap-3 px-4 py-4">
+        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-600 text-white shrink-0">
           <Bot className="h-5 w-5" />
         </div>
-        <div>
-          <h1 className="text-lg font-bold tracking-wide">SmartLedger</h1>
-          <p className="text-[10px] text-muted-foreground">智能体助手</p>
-        </div>
-        <Sparkles className="ml-auto h-4 w-4 text-emerald-500" />
+        {!sidebarCollapsed && (
+          <div className="flex-1 min-w-0">
+            <h1 className="text-base font-bold tracking-wide truncate">SmartLedger</h1>
+            <p className="text-[10px] text-muted-foreground truncate">飘叔智能体助手</p>
+          </div>
+        )}
+        <Sparkles className="h-4 w-4 text-emerald-500 shrink-0" />
+        {/* Collapse button — hide sidebar to icon-only mode */}
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground"
+          onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+          title={sidebarCollapsed ? '展开侧边栏' : '隐身侧边栏(只显示图标)'}
+        >
+          {sidebarCollapsed ? (
+            <PanelLeftOpen className="h-4 w-4" />
+          ) : (
+            <PanelLeftClose className="h-4 w-4" />
+          )}
+        </Button>
       </div>
 
+      {/* New Chat Button */}
       <div className="px-3 pb-2">
         <Button
           onClick={handleNewChat}
           className="w-full justify-start gap-2 bg-emerald-600 hover:bg-emerald-700 text-white"
         >
           <Plus className="h-4 w-4" />
-          新建对话
+          {!sidebarCollapsed && <span>新建对话</span>}
         </Button>
       </div>
 
       <Separator className="mx-3 w-auto" />
 
-      <nav className="flex flex-col gap-1 px-3 py-3">
-        {navItems.map((item) => {
+      {/* Top-level nav (chat / dashboard) */}
+      <nav className="flex flex-col gap-1 px-3 py-2">
+        {topNavItems.map((item) => {
           const Icon = item.icon
           const isActive = activeView === item.view
           return (
             <button
               key={item.view}
               onClick={() => handleNavClick(item.view)}
+              title={sidebarCollapsed ? item.label : undefined}
               className={cn(
-                'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-150',
+                'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-all duration-150',
                 'hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500',
                 isActive
                   ? 'bg-emerald-600/10 text-emerald-700 dark:text-emerald-400'
-                  : 'text-sidebar-foreground/70'
+                  : 'text-sidebar-foreground/70',
+                sidebarCollapsed && 'justify-center px-2'
               )}
             >
-              <Icon className={cn('h-4 w-4', isActive && 'text-emerald-600 dark:text-emerald-400')} />
-              {item.label}
+              <Icon className={cn('h-4 w-4 shrink-0', isActive && 'text-emerald-600 dark:text-emerald-400')} />
+              {!sidebarCollapsed && item.label}
               <AnimatePresence>
-                {isActive && (
+                {isActive && !sidebarCollapsed && (
                   <motion.div
                     className="ml-auto h-1.5 w-1.5 rounded-full bg-emerald-500"
                     initial={{ scale: 0, opacity: 0 }}
@@ -291,15 +430,92 @@ function SidebarContent({ onNavClick }: { onNavClick?: () => void }) {
         })}
       </nav>
 
-      <MemoryCategoryNav onNavigate={onNavClick} />
+      {/* Collapsible sections (memory / tasks / projects / etc) — hidden when sidebar collapsed */}
+      {!sidebarCollapsed && (
+        <ScrollArea className="flex-1 min-h-0">
+          <div className="flex flex-col gap-1 py-2">
+            {sidebarSections.map((section) => (
+              <SidebarSection key={section.id} section={section} onNavigate={onNavClick} />
+            ))}
+          </div>
 
-      <Separator className="mx-3 w-auto" />
+          <Separator className="mx-3 w-auto my-2" />
 
-      <div className="flex-1 min-h-0">
-        <ConversationList />
+          {/* Recent conversations list */}
+          <div className="px-3 pb-2">
+            <div className="px-2 mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">
+              最近对话
+            </div>
+            <ConversationList />
+          </div>
+        </ScrollArea>
+      )}
+
+      {/* When sidebar is collapsed, only show section icons */}
+      {sidebarCollapsed && (
+        <ScrollArea className="flex-1 min-h-0">
+          <div className="flex flex-col gap-1 px-2 py-2 items-center">
+            {sidebarSections.map((section) => {
+              const Icon = section.icon
+              const isActive = activeView === section.view
+              return (
+                <button
+                  key={section.id}
+                  onClick={() => section.view && handleNavClick(section.view)}
+                  title={section.label}
+                  className={cn(
+                    'flex h-9 w-9 items-center justify-center rounded-lg transition-all',
+                    'hover:bg-sidebar-accent',
+                    isActive
+                      ? 'bg-emerald-600/10 text-emerald-700 dark:text-emerald-400'
+                      : 'text-sidebar-foreground/70'
+                  )}
+                >
+                  <Icon className="h-4 w-4" />
+                </button>
+              )
+            })}
+          </div>
+        </ScrollArea>
+      )}
+
+      {/* Bottom: settings + user */}
+      <div className="border-t border-sidebar-border p-2">
+        <nav className="flex flex-col gap-1">
+          {bottomNavItems.map((item) => {
+            const Icon = item.icon
+            const isActive = activeView === item.view
+            return (
+              <button
+                key={item.view}
+                onClick={() => handleNavClick(item.view)}
+                title={sidebarCollapsed ? item.label : undefined}
+                className={cn(
+                  'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-all',
+                  'hover:bg-sidebar-accent',
+                  isActive
+                    ? 'bg-emerald-600/10 text-emerald-700 dark:text-emerald-400'
+                    : 'text-sidebar-foreground/70',
+                  sidebarCollapsed && 'justify-center px-2'
+                )}
+              >
+                <Icon className={cn('h-4 w-4 shrink-0', isActive && 'text-emerald-600 dark:text-emerald-400')} />
+                {!sidebarCollapsed && item.label}
+              </button>
+            )
+          })}
+        </nav>
+        {!sidebarCollapsed && <UserSection />}
+        {sidebarCollapsed && (
+          <div className="flex justify-center pt-2">
+            <Avatar className="h-8 w-8">
+              <AvatarFallback className="bg-emerald-100 text-emerald-700 text-xs font-semibold dark:bg-emerald-900 dark:text-emerald-300">
+                P
+              </AvatarFallback>
+            </Avatar>
+          </div>
+        )}
       </div>
-
-      <UserSection />
     </div>
   )
 }
@@ -319,14 +535,19 @@ export function AgentLayout() {
   const renderMainContent = () => {
     switch (activeView) {
       case 'chat':
+      case 'conversations':
         return <ChatView />
       case 'memory':
+      case 'profile':
         return <MemoryView />
       case 'knowledge':
         return <KnowledgeView />
       case 'runs':
+      case 'tasks':
         return <AgentRunsView />
       case 'dashboard':
+      case 'projects':
+      case 'schedule':
         return <DashboardView />
       case 'settings':
         return <SettingsView />
@@ -335,6 +556,7 @@ export function AgentLayout() {
     }
   }
 
+  // Mobile layout
   if (isMobile) {
     return (
       <div className="flex h-screen w-full overflow-hidden bg-background dark:bg-transparent relative">
@@ -389,7 +611,7 @@ export function AgentLayout() {
       <aside
         className={cn(
           'relative z-10 shrink-0 border-r border-sidebar-border bg-sidebar dark:bg-sidebar/90 dark:backdrop-blur-2xl transition-all duration-300 ease-in-out',
-          sidebarCollapsed ? 'w-0 overflow-hidden' : 'w-[280px]'
+          sidebarCollapsed ? 'w-[64px]' : 'w-[280px]'
         )}
       >
         <SidebarContent />
@@ -402,6 +624,7 @@ export function AgentLayout() {
             size="icon"
             onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
             className="h-8 w-8"
+            title={sidebarCollapsed ? '展开侧边栏' : '隐身侧边栏'}
           >
             <ChevronLeft
               className={cn(
@@ -411,7 +634,10 @@ export function AgentLayout() {
             />
           </Button>
           <div className="text-sm text-muted-foreground">
-            {navItems.find((i) => i.view === activeView)?.label}
+            {topNavItems.find((i) => i.view === activeView)?.label ||
+             sidebarSections.find((s) => s.view === activeView)?.label ||
+             bottomNavItems.find((i) => i.view === activeView)?.label ||
+             'SmartLedger'}
           </div>
         </header>
         <main className="flex-1 min-h-0 overflow-hidden">

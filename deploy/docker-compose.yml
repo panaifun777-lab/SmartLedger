@@ -12,10 +12,12 @@ services:
     volumes:
       - avatar-db:/app/db
       - /opt/avatar-agent/.z-ai-config:/etc/.z-ai-config:ro
+      - /opt/avatar-agent/deploy/.env:/app/.env.host:rw
       - avatar-uploads:/app/upload
     environment:
       - DATABASE_URL=file:/app/db/custom.db
       - NODE_ENV=production
+      - ENV_FILE_PATH=/app/.env.host
     env_file:
       - .env
     healthcheck:
