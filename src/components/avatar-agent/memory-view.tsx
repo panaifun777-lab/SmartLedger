@@ -10,6 +10,142 @@ import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { Textarea } from '@/components/ui/textarea'
+
+// ── ProfileSection: 从 fact/skill 记忆动态生成个人画像卡片 ──
+interface ProfileSectionProps {
+  profileData: {
+    isSeeded: boolean
+    seededCount: number
+    totalSeedItems: number
+    typeCounts: Record<string, number>
+  } | null
+  memories: MemoryItem[]
+}
+
+function ProfileSection({ profileData, memories }: ProfileSectionProps) {
+  // 从记忆里提取用户名 (找 fact 类型里包含"名称"或"姓名"的)
+  const factMemories = memories.filter((m) => m.memoryType === 'fact' && m.status === 'active')
+  const nameMemory = factMemories.find((m) =>
+    m.content.includes('姓名') || m.content.includes('用户名称') || m.content.includes('飘叔')
+  )
+  // 提取名字(从"姓名: xxx" 或 "用户名称: xxx" 格式)
+  const extractName = (content: string): string => {
+    const match = content.match(/(?:姓名|用户名称|名称)[:：]\s*([^,，。；;\s]+)/)
+    if (match) return match[1].trim()
+    if (content.includes('飘叔')) return '飘叔'
+    return ''
+  }
+  const displayName = nameMemory ? extractName(nameMemory.content) : '飘叔'
+
+  // 从 fact 记忆提取职业/身份描述
+  const occupationMemory = factMemories.find((m) =>
+    m.content.includes('职业') || m.content.includes('身份') || m.content.includes('架构师')
+  )
+  const occupation = occupationMemory ? occupationMemory.content.substring(0, 60) : ''
+
+  // 从 skill 记忆提取前 3 个技能标签
+  const skillMemories = memories
+    .filter((m) => m.memoryType === 'skill' && m.status === 'active')
+    .slice(0, 3)
+    .map((m) => {
+      // 从"技能: xxx" 或 "前端技术栈: xxx" 提取关键词
+      const match = m.content.match(/^([^:：]+)/)
+      return match ? match[1].trim() : m.content.substring(0, 12)
+    })
+
+  const [isSeeding, setIsSeeding] = useState(false)
+  const { loadMemories, setLastUpdated } = useMemoryStore()
+  // 复用父组件的 handleSeedProfile 逻辑 — 通过 prop 传入
+  // (这里简化,直接重新实现)
+  const handleSeed = async () => {
+    setIsSeeding(true)
+    try {
+      const resp = await fetch('/api/memory/seed', { method: 'POST' })
+      if (resp.ok) {
+        await loadMemories()
+        setLastUpdated(new Date())
+      }
+    } catch (e) {
+      console.error('Seed failed:', e)
+    } finally {
+      setIsSeeding(false)
+    }
+  }
+
+  return (
+    <div className="px-6 py-4 border-b bg-muted/10">
+      <div className="glass-card rounded-xl border p-4">
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex items-start gap-3 min-w-0">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-900/50">
+              <User className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-semibold">{displayName}</h3>
+                {profileData?.isSeeded && (
+                  <Badge variant="secondary" className="text-[10px] px-1.5 py-0 bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
+                    已初始化
+                  </Badge>
+                )}
+              </div>
+              <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">
+                {occupation || '点击"初始化画像"加载个人记忆'}
+              </p>
+              {skillMemories.length > 0 && (
+                <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+                  {skillMemories.map((skill, i) => (
+                    <span
+                      key={i}
+                      className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium ${
+                        i === 0
+                          ? 'bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300'
+                          : i === 1
+                          ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300'
+                          : 'bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300'
+                      }`}
+                    >
+                      <Code2 className="h-2.5 w-2.5" />
+                      {skill}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+          <div className="flex flex-col items-end gap-2 shrink-0">
+            <Button
+              size="sm"
+              variant={profileData?.isSeeded ? 'outline' : 'default'}
+              className={`gap-1.5 text-xs h-7 ${
+                !profileData?.isSeeded ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : ''
+              }`}
+              onClick={handleSeed}
+              disabled={isSeeding}
+            >
+              {isSeeding ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
+              {profileData?.isSeeded ? '刷新画像' : '初始化画像'}
+            </Button>
+            {profileData?.typeCounts && (
+              <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                {Object.entries(profileData.typeCounts)
+                  .filter(([, count]) => count > 0)
+                  .map(([type, count]) => (
+                    <span
+                      key={type}
+                      className="rounded px-1.5 py-0.5 text-[10px] font-medium bg-muted text-muted-foreground"
+                    >
+                      {type === 'fact' ? '事实' : type === 'skill' ? '技能' : type === 'preference' ? '偏好' : type === 'rule' ? '规则' : type === 'context' ? '上下文' : '事件'} {count}
+                    </span>
+                  ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Slider } from '@/components/ui/slider'
@@ -427,85 +563,8 @@ export function MemoryView() {
           ))}
         </div>
 
-        {/* 个人画像 Profile Section - 基于数据库实际记忆动态显示 */}
-        <div className="px-6 py-4 border-b bg-muted/10">
-          <div className="glass-card rounded-xl border p-4">
-            <div className="flex items-start justify-between gap-4">
-              {/* Left: Profile Info - 从记忆库中提取实际身份 */}
-              <div className="flex items-start gap-3 min-w-0">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-900/50">
-                  <User className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
-                </div>
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-sm font-semibold">飘叔</h3>
-                    {profileData?.isSeeded && (
-                      <Badge variant="secondary" className="text-[10px] px-1.5 py-0 bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
-                        已初始化
-                      </Badge>
-                    )}
-                  </div>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    10年+ 全栈架构师 · Web4.0理论构建者 · AFC公链核心设计者
-                  </p>
-                  {/* Top Skills - 来自飘叔真实画像 */}
-                  <div className="flex items-center gap-1.5 mt-2 flex-wrap">
-                    <span className="inline-flex items-center gap-1 rounded-md bg-blue-50 dark:bg-blue-950/60 px-1.5 py-0.5 text-[10px] font-medium text-blue-700 dark:text-blue-300">
-                      <Code2 className="h-2.5 w-2.5" />
-                      全栈架构
-                    </span>
-                    <span className="inline-flex items-center gap-1 rounded-md bg-emerald-50 dark:bg-emerald-950/60 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-300">
-                      <Server className="h-2.5 w-2.5" />
-                      Web4.0/区块链
-                    </span>
-                    <span className="inline-flex items-center gap-1 rounded-md bg-purple-50 dark:bg-purple-950/60 px-1.5 py-0.5 text-[10px] font-medium text-purple-700 dark:text-purple-300">
-                      <Cpu className="h-2.5 w-2.5" />
-                      AI Agent
-                    </span>
-                  </div>
-                </div>
-              </div>
-              {/* Right: Seed Button + Type Counts */}
-              <div className="flex flex-col items-end gap-2 shrink-0">
-                <Button
-                  size="sm"
-                  variant={profileData?.isSeeded ? 'outline' : 'default'}
-                  className={cn(
-                    'gap-1.5 text-xs h-7',
-                    !profileData?.isSeeded && 'bg-emerald-600 hover:bg-emerald-700 text-white'
-                  )}
-                  onClick={handleSeedProfile}
-                  disabled={isSeeding}
-                >
-                  {isSeeding ? (
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                  ) : (
-                    <Sparkles className="h-3 w-3" />
-                  )}
-                  {profileData?.isSeeded ? '刷新画像' : '初始化画像'}
-                </Button>
-                {/* Type Counts */}
-                {profileData?.typeCounts && (
-                  <div className="flex items-center gap-1.5 flex-wrap justify-end">
-                    {Object.entries(profileData.typeCounts)
-                      .filter(([, count]) => count > 0)
-                      .map(([type, count]) => (
-                        <span
-                          key={type}
-                          className={cn(
-                            'rounded px-1.5 py-0.5 text-[10px] font-medium',
-                            pillColors[type] || 'bg-muted text-muted-foreground'
-                          )}
-                        >
-                          {type === 'fact' ? '事实' : type === 'skill' ? '技能' : type === 'preference' ? '偏好' : type === 'rule' ? '规则' : type === 'context' ? '上下文' : '事件'} {count}
-                        </span>
-                      ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
+        {/* 个人画像 Profile Section - 从记忆库 fact 类型动态生成 */}
+        <ProfileSection profileData={profileData} memories={memories} />
 
         {/* View Mode Toggle + Memory Grid/Graph */}
         {viewMode === 'list' ? (

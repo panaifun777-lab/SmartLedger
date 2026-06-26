@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { getAI, SYSTEM_PROMPT, extractMemories, getRelevantKeywords } from '@/lib/ai';
+import { getAI, SYSTEM_PROMPT, extractMemories, extractMemoriesWithLLM, mergeExtractedMemories } from '@/lib/ai';
 import { getDefaultModel } from '@/lib/models';
+import { recallMemories, createMemoryWithEmbedding } from '@/lib/memory-engine';
 
 export async function POST(request: NextRequest) {
   const startTime = Date.now();
@@ -70,37 +71,30 @@ export async function POST(request: NextRequest) {
     });
     agentRunId = agentRun.id;
 
-    // 4. Recall relevant memories
-    const keywords = getRelevantKeywords(message);
-    let relevantMemories: Array<{ id: string; content: string; memoryType: string }> = [];
-
-    if (keywords.length > 0) {
-      const allActiveMemories = await db.memoryItem.findMany({
-        where: { status: 'active' },
-        select: { id: true, content: true, memoryType: true },
-        take: 100,
-      });
-
-      // Simple keyword matching for memory recall
-      relevantMemories = allActiveMemories.filter((m) => {
-        const contentLower = m.content.toLowerCase();
-        return keywords.some((kw) => contentLower.includes(kw));
-      }).slice(0, 10);
-    }
+    // 4. Recall relevant memories using semantic + keyword hybrid search
+    //    (升级:用 memory-engine 的向量召回,而非纯关键词匹配)
+    const recallResults = await recallMemories(message, 'default-user', 8);
+    const relevantMemories = recallResults.map((r) => ({
+      id: r.memory.id,
+      content: r.memory.content,
+      memoryType: r.memory.memoryType,
+      importance: r.memory.importance,
+      score: r.score,
+    }));
 
     // 5. Build conversation history for LLM
     const chatMessages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
       { role: 'system', content: SYSTEM_PROMPT },
     ];
 
-    // Add memory context if available
+    // Add memory context if available (升级:显示重要性 + 召回评分)
     if (relevantMemories.length > 0) {
       const memoryContext = relevantMemories
-        .map((m) => `[${m.memoryType}] ${m.content}`)
+        .map((m) => `- ${m.content} (类型: ${m.memoryType}, 重要性: ${(m.importance as number).toFixed(2)})`)
         .join('\n');
       chatMessages.push({
         role: 'system',
-        content: `Relevant memories about the user:\n${memoryContext}`,
+        content: `[相关记忆 — 以下是你应该参考的关于用户的长期记忆,按相关性排序]\n${memoryContext}\n\n请在回答时参考以上记忆。如果用户提到的新信息与某条记忆矛盾,请确认并更新。`,
       });
     }
 
@@ -201,27 +195,34 @@ export async function POST(request: NextRequest) {
     });
 
     // 8. Auto-extract and save memories
-    const extractedMemories = extractMemories(message);
+    //    升级:regex + LLM 双重提取,合并去重,带 embedding + 矛盾检测
+    const regexMemories = extractMemories(message);
+    let llmMemories: typeof regexMemories = [];
+
+    // 长消息(>50字符)用 LLM 提取更细粒度的记忆
+    if (message.trim().length > 50) {
+      try {
+        llmMemories = await extractMemoriesWithLLM(message, finalResponse);
+      } catch (err) {
+        console.error('[Chat] LLM memory extraction failed:', err);
+      }
+    }
+
+    const mergedMemories = mergeExtractedMemories(regexMemories, llmMemories);
     let memoryCreated = false;
 
-    for (const mem of extractedMemories) {
+    for (const mem of mergedMemories) {
       try {
-        await db.memoryItem.create({
-          data: {
-            memoryType: mem.memoryType,
-            content: mem.content,
-            importance: mem.importance,
-            confidence: 0.8,
-            sourceType: 'chat',
+        // 用 memory-engine 创建,带 embedding + 矛盾检测
+        await createMemoryWithEmbedding({
+          content: mem.content,
+          memoryType: mem.memoryType,
+          importance: mem.importance,
+          confidence: 0.8,
+          sourceType: 'chat',
+          metadata: {
             sourceId: userMessage.id,
-            status: 'active',
-            versions: {
-              create: {
-                versionNo: 1,
-                content: mem.content,
-                changeReason: 'Auto-extracted from conversation',
-              },
-            },
+            extractedBy: message.trim().length > 50 ? 'regex+llm' : 'regex',
           },
         });
         memoryCreated = true;

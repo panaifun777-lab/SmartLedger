@@ -30,6 +30,14 @@ model MemoryItem {
   sourceId    String?
   status      String   @default("active") // active, deprecated, archived
   metadata    String   @default("{}") // JSON string for flexible data
+  /// Vector embedding (JSON array of floats, 1024 dims for ZHIPU embedding-2).
+  /// NULL when embedding hasn't been computed yet. Stored as text because
+  /// SQLite has no native vector type.
+  embedding   String?
+  /// Number of times this memory has been recalled in a chat.
+  accessCount Int      @default(0)
+  /// Last time this memory was recalled (used for recency boost + decay).
+  lastAccessedAt DateTime?
   expiresAt   DateTime?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -43,6 +51,8 @@ model MemoryItem {
   @@index([status, updatedAt])
   @@index([importance])
   @@index([sourceType])
+  @@index([userId, status])
+  @@index([accessCount])
 }
 
 /// Version history for memory changes (append-only audit trail)
