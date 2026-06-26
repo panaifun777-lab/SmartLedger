@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
-import { Sparkles, Key, RefreshCw, CheckCircle2, AlertCircle, ExternalLink, Loader2 } from 'lucide-react'
+import { Sparkles, Key, RefreshCw, CheckCircle2, AlertCircle, ExternalLink, Loader2, Database } from 'lucide-react'
 import { toast } from 'sonner'
 
 interface KeyStatus {
@@ -27,8 +27,11 @@ export function ApiKeysManager() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [restarting, setRestarting] = useState(false)
+  const [backfilling, setBackfilling] = useState(false)
+  const [showDeepseekInput, setShowDeepseekInput] = useState(false)
   const [showZhipuInput, setShowZhipuInput] = useState(false)
   const [showOpenaiInput, setShowOpenaiInput] = useState(false)
+  const [deepseekKey, setDeepseekKey] = useState('')
   const [zhipuKey, setZhipuKey] = useState('')
   const [openaiKey, setOpenaiKey] = useState('')
 
@@ -51,9 +54,9 @@ export function ApiKeysManager() {
     fetchStatus()
   }, [fetchStatus])
 
-  const handleSaveZhipu = async () => {
-    if (!zhipuKey.trim()) {
-      toast.error('请输入智谱 API Key')
+  const handleSaveKey = async (keyName: 'deepseek_api_key' | 'zhipu_api_key' | 'openai_api_key', value: string, label: string) => {
+    if (!value.trim()) {
+      toast.error(`请输入 ${label} API Key`)
       return
     }
     setSaving(true)
@@ -61,39 +64,15 @@ export function ApiKeysManager() {
       const res = await fetch('/api/admin/keys', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ zhipu_api_key: zhipuKey.trim() }),
+        body: JSON.stringify({ [keyName]: value.trim() }),
       })
       if (res.ok) {
-        toast.success('智谱 API Key 已保存。需要重启容器才能生效。')
+        toast.success(`${label} API Key 已保存。需要重启容器才能生效。`)
+        setDeepseekKey('')
         setZhipuKey('')
-        setShowZhipuInput(false)
-        fetchStatus()
-      } else {
-        const data = await res.json()
-        toast.error(data.error || '保存失败')
-      }
-    } catch (err) {
-      toast.error('网络错误,保存失败')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const handleSaveOpenai = async () => {
-    if (!openaiKey.trim()) {
-      toast.error('请输入 OpenAI API Key')
-      return
-    }
-    setSaving(true)
-    try {
-      const res = await fetch('/api/admin/keys', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ openai_api_key: openaiKey.trim() }),
-      })
-      if (res.ok) {
-        toast.success('OpenAI API Key 已保存。需要重启容器才能生效。')
         setOpenaiKey('')
+        setShowDeepseekInput(false)
+        setShowZhipuInput(false)
         setShowOpenaiInput(false)
         fetchStatus()
       } else {
@@ -114,7 +93,6 @@ export function ApiKeysManager() {
       const res = await fetch('/api/admin/restart', { method: 'POST' })
       if (res.ok) {
         toast.success('容器重启中,请等待 15 秒后刷新页面')
-        // Wait 15s then reload
         setTimeout(() => {
           window.location.reload()
         }, 15000)
@@ -129,6 +107,29 @@ export function ApiKeysManager() {
     }
   }
 
+  const handleBackfill = async () => {
+    if (!confirm('确认批量生成记忆 embedding?这会调用智谱 embedding-2 API,每条记忆约 200ms。已有 embedding 的记忆会跳过。')) return
+    setBackfilling(true)
+    try {
+      const res = await fetch('/api/admin/backfill?batchSize=50', { method: 'POST' })
+      if (res.ok) {
+        const data = await res.json()
+        if (data.remaining > 0) {
+          toast.info(`已处理 ${data.embedded} 条,剩余 ${data.remaining} 条。点击继续处理。`)
+        } else {
+          toast.success(`完成!已为 ${data.embedded} 条记忆生成 embedding,全部处理完毕。`)
+        }
+      } else {
+        const data = await res.json()
+        toast.error(data.error || 'Backfill 失败')
+      }
+    } catch (err) {
+      toast.error('网络错误,backfill 失败')
+    } finally {
+      setBackfilling(false)
+    }
+  }
+
   return (
     <Card className="glass-card">
       <CardHeader className="pb-3">
@@ -137,7 +138,7 @@ export function ApiKeysManager() {
           AI 功能密钥管理
         </CardTitle>
         <p className="text-[11px] text-muted-foreground mt-1">
-          配置智谱 / OpenAI API Key 启用图像生成、视觉理解、TTS 语音合成等功能。保存后需重启容器生效。
+          配置 DeepSeek(对话)/ 智谱(视觉/图像/embedding)/ OpenAI(TTS/ASR) API Key。保存后需重启容器生效。
         </p>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -149,41 +150,73 @@ export function ApiKeysManager() {
           </div>
         ) : status ? (
           <div className="space-y-2">
-            {/* DeepSeek */}
+            {/* DeepSeek — 对话主力 */}
             <div className="flex items-center justify-between rounded-lg border p-2.5">
-              <div className="flex items-center gap-2">
-                <Badge variant="outline" className="text-[10px]">对话</Badge>
+              <div className="flex items-center gap-2 min-w-0">
+                <Badge variant="outline" className="text-[10px] shrink-0">对话</Badge>
                 <span className="text-xs font-medium">DeepSeek</span>
               </div>
               {status.keys.DEEPSEEK_API_KEY ? (
                 <div className="flex items-center gap-2">
-                  <span className="text-[10px] text-muted-foreground font-mono">{status.previews.DEEPSEEK_API_KEY}</span>
-                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
+                  <span className="text-[10px] text-muted-foreground font-mono truncate max-w-[120px]">{status.previews.DEEPSEEK_API_KEY}</span>
+                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                  <Button size="sm" variant="ghost" className="h-6 text-[10px] px-2 shrink-0" onClick={() => setShowDeepseekInput(!showDeepseekInput)}>
+                    更换
+                  </Button>
                 </div>
               ) : (
-                <AlertCircle className="h-3.5 w-3.5 text-amber-500" />
-              )}
-            </div>
-
-            {/* ZHIPU */}
-            <div className="flex items-center justify-between rounded-lg border p-2.5">
-              <div className="flex items-center gap-2">
-                <Badge variant="outline" className="text-[10px]">视觉/图像/TTS</Badge>
-                <span className="text-xs font-medium">智谱 GLM</span>
-              </div>
-              {status.keys.ZHIPU_API_KEY ? (
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] text-muted-foreground font-mono">{status.previews.ZHIPU_API_KEY}</span>
-                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
-                </div>
-              ) : (
-                <Button size="sm" variant="outline" className="h-6 text-[10px] px-2" onClick={() => setShowZhipuInput(!showZhipuInput)}>
+                <Button size="sm" variant="outline" className="h-6 text-[10px] px-2 shrink-0" onClick={() => setShowDeepseekInput(!showDeepseekInput)}>
                   配置 Key
                 </Button>
               )}
             </div>
+            {showDeepseekInput && (
+              <div className="rounded-lg border bg-muted/30 p-3 space-y-2">
+                <Label htmlFor="deepseek-key" className="text-[11px]">DeepSeek API Key (sk-xxx)</Label>
+                <Input
+                  id="deepseek-key"
+                  type="password"
+                  value={deepseekKey}
+                  onChange={(e) => setDeepseekKey(e.target.value)}
+                  placeholder="sk-xxxxxxxxxxxxxxxxxxxx"
+                  className="h-8 text-xs"
+                />
+                <div className="flex items-center gap-2">
+                  <Button size="sm" className="h-7 text-xs" onClick={() => handleSaveKey('deepseek_api_key', deepseekKey, 'DeepSeek')} disabled={saving || !deepseekKey.trim()}>
+                    {saving ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
+                    保存
+                  </Button>
+                  <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setShowDeepseekInput(false)}>取消</Button>
+                  <a href="https://platform.deepseek.com/api_keys" target="_blank" rel="noopener noreferrer" className="ml-auto text-[10px] text-emerald-600 hover:underline flex items-center gap-0.5">
+                    获取 Key <ExternalLink className="h-2.5 w-2.5" />
+                  </a>
+                </div>
+                <p className="text-[10px] text-muted-foreground">
+                  DeepSeek 用于对话主力模型 (deepseek-chat / deepseek-reasoner)。注意:DeepSeek 不提供 embedding API,embedding 用智谱。
+                </p>
+              </div>
+            )}
 
-            {/* ZHIPU input form */}
+            {/* ZHIPU — 视觉/图像/embedding */}
+            <div className="flex items-center justify-between rounded-lg border p-2.5">
+              <div className="flex items-center gap-2 min-w-0">
+                <Badge variant="outline" className="text-[10px] shrink-0">视觉/图像/embedding</Badge>
+                <span className="text-xs font-medium">智谱 GLM</span>
+              </div>
+              {status.keys.ZHIPU_API_KEY ? (
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-muted-foreground font-mono truncate max-w-[120px]">{status.previews.ZHIPU_API_KEY}</span>
+                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                  <Button size="sm" variant="ghost" className="h-6 text-[10px] px-2 shrink-0" onClick={() => setShowZhipuInput(!showZhipuInput)}>
+                    更换
+                  </Button>
+                </div>
+              ) : (
+                <Button size="sm" variant="outline" className="h-6 text-[10px] px-2 shrink-0" onClick={() => setShowZhipuInput(!showZhipuInput)}>
+                  配置 Key
+                </Button>
+              )}
+            </div>
             {showZhipuInput && (
               <div className="rounded-lg border bg-muted/30 p-3 space-y-2">
                 <Label htmlFor="zhipu-key" className="text-[11px]">智谱 API Key (格式: id.secret)</Label>
@@ -196,47 +229,41 @@ export function ApiKeysManager() {
                   className="h-8 text-xs"
                 />
                 <div className="flex items-center gap-2">
-                  <Button size="sm" className="h-7 text-xs" onClick={handleSaveZhipu} disabled={saving || !zhipuKey.trim()}>
+                  <Button size="sm" className="h-7 text-xs" onClick={() => handleSaveKey('zhipu_api_key', zhipuKey, '智谱')} disabled={saving || !zhipuKey.trim()}>
                     {saving ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
                     保存
                   </Button>
-                  <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setShowZhipuInput(false)}>
-                    取消
-                  </Button>
-                  <a
-                    href="https://open.bigmodel.cn/usercenter/apikeys"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="ml-auto text-[10px] text-emerald-600 hover:underline flex items-center gap-0.5"
-                  >
+                  <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setShowZhipuInput(false)}>取消</Button>
+                  <a href="https://open.bigmodel.cn/usercenter/apikeys" target="_blank" rel="noopener noreferrer" className="ml-auto text-[10px] text-emerald-600 hover:underline flex items-center gap-0.5">
                     获取 Key <ExternalLink className="h-2.5 w-2.5" />
                   </a>
                 </div>
                 <p className="text-[10px] text-muted-foreground">
-                  注册智谱开放平台免费送 2000 万 token,启用 GLM-4V-Plus(视觉) + CogView-3-Plus(图像) + CogTTS(语音)
+                  智谱用于: GLM-4V-Plus(视觉) + CogView-3-Plus(图像生成) + embedding-2(记忆向量) + web-search-pro(搜索)。新用户送 2000 万 token。
                 </p>
               </div>
             )}
 
             {/* OpenAI */}
             <div className="flex items-center justify-between rounded-lg border p-2.5">
-              <div className="flex items-center gap-2">
-                <Badge variant="outline" className="text-[10px]">视觉/图像/TTS/ASR</Badge>
+              <div className="flex items-center gap-2 min-w-0">
+                <Badge variant="outline" className="text-[10px] shrink-0">TTS/ASR</Badge>
                 <span className="text-xs font-medium">OpenAI</span>
               </div>
               {status.keys.OPENAI_API_KEY ? (
                 <div className="flex items-center gap-2">
-                  <span className="text-[10px] text-muted-foreground font-mono">{status.previews.OPENAI_API_KEY}</span>
-                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
+                  <span className="text-[10px] text-muted-foreground font-mono truncate max-w-[120px]">{status.previews.OPENAI_API_KEY}</span>
+                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                  <Button size="sm" variant="ghost" className="h-6 text-[10px] px-2 shrink-0" onClick={() => setShowOpenaiInput(!showOpenaiInput)}>
+                    更换
+                  </Button>
                 </div>
               ) : (
-                <Button size="sm" variant="outline" className="h-6 text-[10px] px-2" onClick={() => setShowOpenaiInput(!showOpenaiInput)}>
+                <Button size="sm" variant="outline" className="h-6 text-[10px] px-2 shrink-0" onClick={() => setShowOpenaiInput(!showOpenaiInput)}>
                   配置 Key
                 </Button>
               )}
             </div>
-
-            {/* OpenAI input form */}
             {showOpenaiInput && (
               <div className="rounded-lg border bg-muted/30 p-3 space-y-2">
                 <Label htmlFor="openai-key" className="text-[11px]">OpenAI API Key (sk-xxx)</Label>
@@ -249,24 +276,17 @@ export function ApiKeysManager() {
                   className="h-8 text-xs"
                 />
                 <div className="flex items-center gap-2">
-                  <Button size="sm" className="h-7 text-xs" onClick={handleSaveOpenai} disabled={saving || !openaiKey.trim()}>
+                  <Button size="sm" className="h-7 text-xs" onClick={() => handleSaveKey('openai_api_key', openaiKey, 'OpenAI')} disabled={saving || !openaiKey.trim()}>
                     {saving ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
                     保存
                   </Button>
-                  <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setShowOpenaiInput(false)}>
-                    取消
-                  </Button>
-                  <a
-                    href="https://platform.openai.com/api-keys"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="ml-auto text-[10px] text-emerald-600 hover:underline flex items-center gap-0.5"
-                  >
+                  <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setShowOpenaiInput(false)}>取消</Button>
+                  <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer" className="ml-auto text-[10px] text-emerald-600 hover:underline flex items-center gap-0.5">
                     获取 Key <ExternalLink className="h-2.5 w-2.5" />
                   </a>
                 </div>
                 <p className="text-[10px] text-muted-foreground">
-                  OpenAI 启用: GPT-4V(视觉) + DALL-E 3(图像) + TTS-1(语音合成) + Whisper(语音识别)
+                  OpenAI 启用: GPT-4V(视觉) + DALL-E 3(图像) + TTS-1(语音合成) + Whisper(语音识别 ASR)
                 </p>
               </div>
             )}
@@ -274,6 +294,32 @@ export function ApiKeysManager() {
         ) : (
           <div className="text-xs text-muted-foreground">无法读取 Key 状态</div>
         )}
+
+        {/* Backfill button — 批量给记忆生成 embedding */}
+        <div className="pt-2 border-t">
+          <Button
+            variant="outline"
+            size="sm"
+            className="w-full gap-1.5"
+            onClick={handleBackfill}
+            disabled={backfilling || !status?.keys.ZHIPU_API_KEY}
+          >
+            {backfilling ? (
+              <>
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                生成 embedding 中...
+              </>
+            ) : (
+              <>
+                <Database className="h-3.5 w-3.5" />
+                批量生成记忆 Embedding
+              </>
+            )}
+          </Button>
+          <p className="text-[10px] text-muted-foreground mt-1.5 text-center">
+            为没有向量嵌入的记忆生成 embedding (智谱 embedding-2),启用语义召回
+          </p>
+        </div>
 
         {/* Restart button */}
         <div className="pt-2 border-t">
@@ -307,10 +353,11 @@ export function ApiKeysManager() {
             功能启用状态
           </p>
           <div className="grid grid-cols-2 gap-1.5 text-[10px]">
-            <FeatureItem label="对话" enabled={!!status?.keys.DEEPSEEK_API_KEY} />
+            <FeatureItem label="对话 (DeepSeek)" enabled={!!status?.keys.DEEPSEEK_API_KEY} />
             <FeatureItem label="网络搜索" enabled={true} />
             <FeatureItem label="图像生成" enabled={!!status?.keys.ZHIPU_API_KEY || !!status?.keys.OPENAI_API_KEY} />
             <FeatureItem label="视觉理解" enabled={!!status?.keys.ZHIPU_API_KEY || !!status?.keys.OPENAI_API_KEY} />
+            <FeatureItem label="记忆 embedding" enabled={!!status?.keys.ZHIPU_API_KEY} />
             <FeatureItem label="TTS 语音合成" enabled={!!status?.keys.ZHIPU_API_KEY || !!status?.keys.OPENAI_API_KEY} />
             <FeatureItem label="ASR 语音识别" enabled={!!status?.keys.OPENAI_API_KEY} />
           </div>
@@ -328,7 +375,7 @@ function FeatureItem({ label, enabled }: { label: string; enabled: boolean }) {
       ) : (
         <AlertCircle className="h-2.5 w-2.5 text-muted-foreground shrink-0" />
       )}
-      <span className={enabled ? 'text-emerald-700 dark:text-emerald-400' : 'text-muted-foreground'}>{label}</span>
+      <span className={`truncate ${enabled ? 'text-emerald-700 dark:text-emerald-400' : 'text-muted-foreground'}`}>{label}</span>
     </div>
   )
 }
