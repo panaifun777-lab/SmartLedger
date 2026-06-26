@@ -587,19 +587,40 @@ async function executeImageGen(
   });
 
   const imageBase64Result = imageResponse.data[0].base64;
-  const filename = `img_${Date.now()}.png`;
-  const publicDir = path.join(process.cwd(), 'public', 'generated');
-  if (!fs.existsSync(publicDir)) {
-    fs.mkdirSync(publicDir, { recursive: true });
-  }
-  const filepath = path.join(publicDir, filename);
   const imageBuffer = Buffer.from(imageBase64Result, 'base64');
-  fs.writeFileSync(filepath, imageBuffer);
+
+  // Detect image format
+  let mimeType = 'image/png';
+  if (imageBuffer.length >= 3) {
+    if (imageBuffer[0] === 0xff && imageBuffer[1] === 0xd8 && imageBuffer[2] === 0xff) {
+      mimeType = 'image/jpeg';
+    } else if (imageBuffer.length >= 12 && imageBuffer[0] === 0x52 && imageBuffer[1] === 0x49 && imageBuffer[2] === 0x46 && imageBuffer[3] === 0x46) {
+      mimeType = 'image/webp';
+    }
+  }
+
+  // Also save to disk for persistence (best-effort, non-fatal if it fails)
+  try {
+    const ext = mimeType.split('/')[1];
+    const filename = `img_${Date.now()}.${ext}`;
+    const publicDir = path.join(process.cwd(), 'public', 'generated');
+    if (!fs.existsSync(publicDir)) {
+      fs.mkdirSync(publicDir, { recursive: true });
+    }
+    const filepath = path.join(publicDir, filename);
+    fs.writeFileSync(filepath, imageBuffer);
+  } catch (writeErr) {
+    console.error('Failed to save image to disk (non-fatal):', writeErr);
+  }
+
+  // Return data URL — this is the most reliable way to display in browser
+  // (Next.js standalone mode doesn't serve runtime-generated files from public/)
+  const dataUrl = `data:${mimeType};base64,${imageBase64Result}`;
 
   return {
     type: 'image_gen',
     content: `Generated image for: ${prompt}`,
-    images: [{ url: `/generated/${filename}`, prompt }],
+    images: [{ url: dataUrl, prompt }],
   };
 }
 
