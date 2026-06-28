@@ -20,18 +20,60 @@
  *   OPENAI_API_KEY   — vision, image gen, TTS, ASR
  */
 
+/**
+ * Multi-backend AI Adapter
+ *
+ * Routes calls to the most appropriate backend based on available env vars.
+ *
+ * Chat backend priority:
+ *   1. ZHIPU GLM-4-Flash (FREE, always available if ZHIPU_API_KEY is set)
+ *   2. DeepSeek (paid, used as fallback)
+ *   3. OpenAI (paid, last resort)
+ *
+ * This ensures chat always works even when DeepSeek runs out of balance.
+ */
 const DEEPSEEK_BASE_URL = 'https://api.deepseek.com/v1';
 const ZHIPU_BASE_URL = 'https://open.bigmodel.cn/api/paas/v4';
 const OPENAI_BASE_URL = 'https://api.openai.com/v1';
 
-/** Map any model id to a DeepSeek model id. */
-function mapChatModel(model?: string): string {
-  if (!model) return 'deepseek-chat';
-  const m = model.toLowerCase();
+/** Determine which chat backend to use based on available keys + model preference.
+ *
+ * Priority: ZHIPU (free) → DeepSeek → OpenAI
+ * Reasoner models always go to DeepSeek (ZHIPU doesn't have a reasoner).
+ */
+function getChatBackend(model?: string): { backend: 'zhipu' | 'deepseek' | 'openai'; model: string } {
+  const zhipuKey = process.env.ZHIPU_API_KEY?.trim();
+  const deepseekKey = process.env.DEEPSEEK_API_KEY?.trim();
+  const openaiKey = process.env.OPENAI_API_KEY?.trim();
+
+  const m = (model || '').toLowerCase();
+
+  // Reasoner models → DeepSeek only (ZHIPU doesn't have reasoning)
   if (m.includes('reasoner') || m.includes('r1') || m.includes('o1') || m.includes('reasoning')) {
-    return 'deepseek-reasoner';
+    if (deepseekKey) return { backend: 'deepseek', model: 'deepseek-reasoner' };
   }
-  return 'deepseek-chat';
+
+  // Default: prefer ZHIPU GLM-4-Flash (FREE)
+  if (zhipuKey) {
+    return { backend: 'zhipu', model: 'glm-4-flash' };
+  }
+
+  // Fallback to DeepSeek
+  if (deepseekKey) {
+    return { backend: 'deepseek', model: 'deepseek-chat' };
+  }
+
+  // Last resort: OpenAI
+  if (openaiKey) {
+    return { backend: 'openai', model: 'gpt-4o-mini' };
+  }
+
+  return { backend: 'zhipu', model: 'glm-4-flash' };
+}
+
+/** Legacy function kept for backwards compatibility. */
+function mapChatModel(model?: string): string {
+  return getChatBackend(model).model;
 }
 
 /** Map any vision model id to a ZHIPU or OpenAI vision model. */
@@ -283,7 +325,7 @@ export class MultiBackendAdapter {
   chat = {
     completions: {
       create: async (params: ChatCompletionRequest): Promise<ChatCompletionResponse | AsyncIterable<StreamChunk>> => {
-        const model = mapChatModel(params.model);
+        const { backend, model } = getChatBackend(params.model);
         const body = {
           model,
           messages: params.messages,
@@ -292,11 +334,30 @@ export class MultiBackendAdapter {
           ...(params.max_tokens !== undefined && { max_tokens: params.max_tokens }),
         };
 
-        const url = `${DEEPSEEK_BASE_URL}/chat/completions`;
-        const headers: Record<string, string> = {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${this.deepseekKey}`,
-        };
+        // Determine URL + headers based on backend
+        let url: string;
+        let headers: Record<string, string> = { 'Content-Type': 'application/json' };
+
+        if (backend === 'zhipu' && this.zhipuKey) {
+          url = `${ZHIPU_BASE_URL}/chat/completions`;
+          const token = await zhipuJwt(this.zhipuKey);
+          headers.Authorization = `Bearer ${token}`;
+        } else if (backend === 'deepseek' && this.deepseekKey) {
+          url = `${DEEPSEEK_BASE_URL}/chat/completions`;
+          headers.Authorization = `Bearer ${this.deepseekKey}`;
+        } else if (backend === 'openai' && this.openaiKey) {
+          url = `${OPENAI_BASE_URL}/chat/completions`;
+          headers.Authorization = `Bearer ${this.openaiKey}`;
+        } else {
+          // Last resort: try ZHIPU even if key check failed
+          if (this.zhipuKey) {
+            url = `${ZHIPU_BASE_URL}/chat/completions`;
+            const token = await zhipuJwt(this.zhipuKey);
+            headers.Authorization = `Bearer ${token}`;
+          } else {
+            throw new Error('No chat backend available. Set ZHIPU_API_KEY, DEEPSEEK_API_KEY, or OPENAI_API_KEY.');
+          }
+        }
 
         if (params.stream) {
           async function* gen(): AsyncIterable<StreamChunk> {
@@ -306,9 +367,9 @@ export class MultiBackendAdapter {
               body: JSON.stringify(body),
             });
             if (!resp.ok) {
-              throw new Error(`DeepSeek API error ${resp.status}: ${await resp.text()}`);
+              throw new Error(`Chat API (${backend}) error ${resp.status}: ${await resp.text()}`);
             }
-            if (!resp.body) throw new Error('DeepSeek stream: empty body');
+            if (!resp.body) throw new Error('Chat stream: empty body');
             const reader = resp.body.getReader();
             const decoder = new TextDecoder('utf-8');
             let buffer = '';
@@ -340,7 +401,7 @@ export class MultiBackendAdapter {
           body: JSON.stringify(body),
         });
         if (!resp.ok) {
-          throw new Error(`DeepSeek API error ${resp.status}: ${await resp.text()}`);
+          throw new Error(`Chat API (${backend}) error ${resp.status}: ${await resp.text()}`);
         }
         return (await resp.json()) as ChatCompletionResponse;
       },
